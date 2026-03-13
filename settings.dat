@@ -1,9 +1,0 @@
-return {
-  PallasAttackOOC = false,
-  PallasAttackTarget = true,
-  PallasAutoTarget = false,
-  PallasESP = true,
-  PallasEnabled = true,
-  PallasSpecIdx = 1,
-  PallasSpecName = "Mistweaver",
-}
