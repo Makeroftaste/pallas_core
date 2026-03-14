@@ -44,6 +44,8 @@ function Unit:New(entity)
     IsChanneling    = u.is_channeling or false,
     CastingSpellId  = u.casting_spell_id or 0,
     CastingSpellName= u.casting_spell_name or "",
+    ChannelingSpellId   = u.channeling_spell_id or 0,
+    ChannelingSpellName = u.channeling_spell_name or "",
     Auras           = u.auras or {},
 
     -- Specialization (active player only, from GetSpecialization game func)
@@ -61,7 +63,26 @@ function Unit:New(entity)
 end
 
 function Unit:IsCastingOrChanneling()
-  return self.IsCasting or self.IsChanneling
+  -- OM snapshot is accurate for the local player (uses GetUnitSpellInfo).
+  -- For the current target, also query the live game state as a fallback.
+  if self.IsCasting or self.IsChanneling then return true end
+  local token = self:_UnitToken()
+  if token then
+    local ok, cast = pcall(game.unit_casting_info, token)
+    if ok and cast then return true end
+    local ok2, chan = pcall(game.unit_channel_info, token)
+    if ok2 and chan then return true end
+  end
+  return false
+end
+
+--- Resolve a WoW unit token for this unit (for game.unit_casting_info etc.).
+--- Returns "player" for the local player, "target" for the current target, nil otherwise.
+function Unit:_UnitToken()
+  if Me and self.Guid == Me.Guid then return "player" end
+  local ok, tgt = pcall(game.target)
+  if ok and tgt and tgt.guid == self.Guid then return "target" end
+  return nil
 end
 
 function Unit:DeadOrGhost()
@@ -216,31 +237,39 @@ function Unit:IsLootable()
   return self._is_lootable
 end
 
---- Check if this unit is interruptible.  For the player's current target,
---- we can query the live cast state via game.unit_casting_info("target").
---- For other units we fall back to the snapshot is_casting flag (no
---- not_interruptible data is available from the OM snapshot).
+--- Check if this unit is interruptible (casting or channeling a kickable spell).
+--- Uses the live game state via unit_casting_info / unit_channel_info for
+--- the player and current target. Falls back to the OM snapshot for other units.
 function Unit:IsInterruptible()
-  if not self.IsCasting then return false end
-  -- If this unit happens to be our current target, use the rich cast info
-  local tgt = game.target()
-  if tgt and tgt.guid == self.Guid then
-    local ok, cast = pcall(game.unit_casting_info, "target")
-    if ok and cast then
-      return not cast.not_interruptible
-    end
+  if not self:IsCastingOrChanneling() then return false end
+  local token = self:_UnitToken()
+  if token then
+    local ok, cast = pcall(game.unit_casting_info, token)
+    if ok and cast then return not cast.not_interruptible end
+    local ok2, chan = pcall(game.unit_channel_info, token)
+    if ok2 and chan then return not chan.not_interruptible end
   end
-  return true
+  return self.IsCasting or self.IsChanneling
 end
 
 function Unit:CastingInfo()
   if not self.obj_ptr then return nil, nil end
+  -- Prefer live data for player/target
+  local token = self:_UnitToken()
+  if token then
+    local ok, cast = pcall(game.unit_casting_info, token)
+    local ok2, chan = pcall(game.unit_channel_info, token)
+    return ok and cast or nil, ok2 and chan or nil
+  end
+  -- Fallback to OM snapshot
   local cast = nil
   local chan = nil
   if self.IsCasting then
     cast = { spell_id = self.CastingSpellId, spell_name = self.CastingSpellName }
   end
-  if self.IsChanneling then chan = true end
+  if self.IsChanneling then
+    chan = { spell_id = self.ChannelingSpellId, spell_name = self.ChannelingSpellName }
+  end
   return cast, chan
 end
 

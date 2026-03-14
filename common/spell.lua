@@ -70,13 +70,27 @@ end
 
 function SpellWrapper:InRange(target)
     if not target then return true end
+    -- Prefer the native game function (exact server-side range logic)
+    if game.is_spell_in_range and target.obj_ptr then
+        local ok, val = pcall(game.is_spell_in_range, self.Id, target.obj_ptr)
+        if ok and val ~= nil then
+            return val == 1
+        end
+        -- nil = spell has no range component; fall through to melee/distance check
+    end
     local ok, info = pcall(game.get_spell_info, self.Id)
     if not ok or not info then return true end
     local max_range = info.max_range or 0
     if max_range < 0.1 then return Me and Me:InMeleeRange(target) or false end
     local d = Me and Me:GetDistance(target) or -1
-    if d < 0 then return true end -- unknown distance: assume in range, let server reject
+    if d < 0 then return true end
     return d <= max_range
+end
+
+function SpellWrapper:IsCurrentSpell()
+    if self.Id == 0 then return false end
+    local ok, val = pcall(game.is_current_spell, self.Id)
+    return ok and val or false
 end
 
 --- Low-level cast.  Uses cast_spell_at_unit(id, obj_ptr, {ground=1}) which
