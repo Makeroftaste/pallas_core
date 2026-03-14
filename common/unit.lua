@@ -36,7 +36,10 @@ function Unit:New(entity)
     IsDead       = u.is_dead or false,
     IsPlayer     = u.is_player or false,
     InCombat     = u.in_combat or false,
-    IsMounted    = u.is_mounted or false,
+    IsMounted       = u.is_mounted or false,
+    MountDisplayId  = u.mount_display_id or 0,
+    Classification  = u.classification or 0,
+    ClassificationName = u.classification_name or "normal",
     IsCasting       = u.is_casting or false,
     IsChanneling    = u.is_channeling or false,
     CastingSpellId  = u.casting_spell_id or 0,
@@ -193,6 +196,20 @@ end
 
 function Unit:IsMoving()
   return self.Speed > 0.1
+end
+
+function Unit:IsElite()
+  local c = self.Classification
+  return c == 1 or c == 2 or c == 3
+end
+
+function Unit:IsRare()
+  local c = self.Classification
+  return c == 2 or c == 4
+end
+
+function Unit:IsWorldBoss()
+  return self.Classification == 3
 end
 
 function Unit:IsLootable()
