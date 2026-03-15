@@ -182,71 +182,28 @@ function Unit:GetDistance(other)
 end
 
 function Unit:InMeleeRange(other)
-  -- Use native spell range check for melee when checking between Me and another unit
-  if self == Me and game.is_spell_in_range and other and other.obj_ptr then
-    local ok, val = pcall(game.is_spell_in_range, 6603, other.obj_ptr) -- 6603 = basic attack
-    if ok and val ~= nil then
-      return val == 1
-    end
+  if not other then
+    return false
   end
 
-  -- Enhanced check using bounding boxes when available
-  if game.entity_bounds and other and other.obj_ptr then
-    local ok, bounds = pcall(game.entity_bounds, other.obj_ptr)
-    if ok and bounds then
-      -- Calculate distance to the closest point on the bounding box
-      local sp = self.Position
-      local op = other.Position
-
-      -- Get current positions if not available
-      if not sp and self.obj_ptr then
-        local ok2, x, y, z = pcall(game.entity_position, self.obj_ptr)
-        if ok2 and x then
-          sp = { x = x, y = y, z = z }
-          self.Position = sp
-        end
-      end
-      if not op and other.obj_ptr then
-        local ok2, x, y, z = pcall(game.entity_position, other.obj_ptr)
-        if ok2 and x then
-          op = { x = x, y = y, z = z }
-          other.Position = op
-        end
-      end
-
-      if sp and op then
-        -- Convert bounding box from local space to world space
-        -- Bounding box coords are relative offsets from target position
-        local world_min_x = op.x + bounds.min_x
-        local world_min_y = op.y + bounds.min_y
-        local world_min_z = op.z + bounds.min_z
-        local world_max_x = op.x + bounds.max_x
-        local world_max_y = op.y + bounds.max_y
-        local world_max_z = op.z + bounds.max_z
-
-        -- Find closest point on bounding box to self position
-        local closest_x = math.max(world_min_x, math.min(sp.x, world_max_x))
-        local closest_y = math.max(world_min_y, math.min(sp.y, world_max_y))
-        local closest_z = math.max(world_min_z, math.min(sp.z, world_max_z))
-
-        -- Calculate distance to closest point
-        local dist_to_bounds = game.distance(sp.x, sp.y, sp.z, closest_x, closest_y, closest_z)
-
-        return dist_to_bounds <= 4.5
-      end
-    else
-      -- entity_bounds failed, will fall back to distance check
-    end
-  else
-    -- entity_bounds not available, will fall back to distance check
-  end
-
-  -- Fallback to distance-based check
+  -- Get distance between units
   local d = self:GetDistance(other)
   if d < 0 then
     return true
   end -- unknown distance: assume in range
-  return d <= 4.5
+
+  -- Enhanced check using bounding radius when available
+  if game.entity_bounds and other.obj_ptr then
+    local ok, bounds = pcall(game.entity_bounds, other.obj_ptr)
+    if ok and bounds then
+      -- Use blood DK approach: 5yd base + target's model half-width
+      local melee_range = 5.0 + (bounds.width * 0.5)
+      return d <= melee_range
+    end
+  end
+
+  -- Fallback to standard melee range
+  return d <= 5.0
 end
 
 function Unit:IsFacing(other, threshold)

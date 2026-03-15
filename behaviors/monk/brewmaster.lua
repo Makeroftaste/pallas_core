@@ -1,0 +1,54 @@
+local options = {
+  Name = "Monk (Brewmaster)", -- shown as collapsing header
+
+  Widgets = {
+    { type = "text", text = "=== General ===" },
+  },
+}
+
+local auras = { tiger_palm = 125359 }
+
+local function DoCombat()
+  local target = Combat.BestTarget
+  if not target then
+    return
+  end
+
+  if not Me:InMeleeRange(target) then
+    return
+  end
+
+  if not Me:IsAutoAttacking() and Me:StartAttack(target) then
+    return
+  end
+
+  if Spell:IsGCDActive() then
+    return
+  end
+
+  if not Me:HasAura(auras.tiger_palm) and Spell.TigerPalm:CastEx(target) then
+    return
+  end
+
+  if Spell.KegSmash:CastEx(target) then
+    return
+  end
+
+  if Spell.BlackoutKick:CastEx(target) then
+    return
+  end
+
+  if Spell.Jab:CastEx(target) then
+    return
+  end
+
+  if Spell.TigerPalm:CastEx(target) then
+    return
+  end
+end
+
+local behaviors = {
+  [BehaviorType.Combat] = DoCombat,
+}
+
+return { Options = options, Behaviors = behaviors }
