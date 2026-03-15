@@ -30,7 +30,7 @@ end
 function Combat:CollectTargets()
   if not Me.InCombat and PallasSettings.PallasAttackOOC then
     local tgt = Me.Target
-    if tgt and not tgt.IsDead and Me:CanAttack(tgt) then
+    if tgt and tgt:validTarget() then
       self.Targets[#self.Targets + 1] = tgt
     end
     return
@@ -76,7 +76,7 @@ function Combat:ExclusionFilter()
   local my_tgt_guid = Me.Target and Me.Target.Guid or ""
   local keep = {}
   for _, u in ipairs(self.Targets) do
-    if not u or not Me:CanAttack(u) then goto skip_ex end
+    if not u or not u:validTarget() then goto skip_ex end
 
     -- Threat gate: filter mobs that are in combat with something else, not us.
     -- Exempt the player's current target when "Always attack current target" is on.
@@ -108,7 +108,7 @@ function Combat:InclusionFilter()
     if u.Guid == tgt.Guid then return end
   end
 
-  if tgt.IsDead or tgt.Health <= 0 or not Me:CanAttack(tgt) then return end
+  if not tgt:validTarget() then return end
   self.Targets[#self.Targets + 1] = tgt
 end
 

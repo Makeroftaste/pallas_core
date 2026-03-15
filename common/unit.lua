@@ -52,8 +52,8 @@ function Unit:New(entity)
 
     -- Melee range fields (from CGUnit descriptors)
     BoundingRadius = u.bounding_radius or 0,
-    CombatReach    = u.combat_reach or 0,
-    UnitFlags3     = u.unit_flags3 or 0,
+    CombatReach = u.combat_reach or 0,
+    UnitFlags3 = u.unit_flags3 or 0,
 
     -- Specialization (active player only, from GetSpecialization game func)
     SpecId = u.spec_id or 0, -- 1-based index (1-4), 0 = unknown
@@ -221,9 +221,13 @@ function Unit:HasAura(name_or_id)
     for i = 1, #auras do
       local a = auras[i]
       if is_id then
-        if a.spell_id == name_or_id then return true end
+        if a.spell_id == name_or_id then
+          return true
+        end
       else
-        if a.name == name_or_id then return true end
+        if a.name == name_or_id then
+          return true
+        end
       end
     end
     return false
@@ -377,6 +381,19 @@ function Unit:GetTarget()
     return Unit:New(tgt)
   end
   return nil
+end
+
+-- Check if this unit is a valid target
+function Unit:validTarget()
+  if self.IsDead or self:DeadOrGhost() then
+    return false
+  end
+
+  if Me and Me.CanAttack and not Me:CanAttack(self) then
+    return false
+  end
+
+  return true
 end
 
 -- Alias used by Pallas-style code: unit.Target (property, not method).
