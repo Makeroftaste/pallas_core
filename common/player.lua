@@ -26,10 +26,9 @@ function Player:IsAutoAttacking()
 end
 
 -- Check if the player is currently auto-ranging
--- Spell ID 75 is "Auto Shot"
 ---@return boolean - true if the player is auto-ranging, false otherwise
 function Player:IsAutoRanging()
-  return Spell.AutoShot:
+  return Spell.AutoShot:IsAutoRepeat()
 end
 
 -- Stop any ongoing casting
