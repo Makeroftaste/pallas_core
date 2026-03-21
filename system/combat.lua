@@ -11,6 +11,13 @@ Combat.Enemies             = 0
 
 function Combat:Update()
   Targeting.Update(self)
+  
+  -- Auto-target functionality: if we don't have a target and auto-target is enabled, target the best target
+  if PallasSettings.PallasAutoTarget and Me and not Me.Target then
+    if self.BestTarget and self.BestTarget:validTarget() then
+      Me:SetTarget(self.BestTarget)
+    end
+  end
 end
 
 function Combat:Reset()
@@ -98,19 +105,7 @@ function Combat:ExclusionFilter()
 
     -- Check if unit is in combat with player or party
     if not u.InCombat and not u:isUnitInCombatWithParty(u) then
-      -- Check if the unit is in combat with the player's pet
-      local pet = Pet and Pet.current
-      if pet and u.inCombatWith(pet) then
-        keep[#keep + 1] = u
-        goto skip_ex
-      end
       goto skip_ex
-    end
-
-    -- Geometry-only LOS: terrain + buildings, no model collision
-    do
-      local ok, vis = pcall(game.is_visible, Me.obj_ptr, u.obj_ptr, LOS_FLAGS)
-      if ok and not vis then goto skip_ex end
     end
 
     keep[#keep + 1] = u
