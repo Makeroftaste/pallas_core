@@ -293,7 +293,9 @@ function Unit:IsDPS()
 end
 
 function Unit:IsMoving()
-  return self.Speed > 0.1
+  local ok, moving = pcall(game.unit_is_moving)
+  if ok then return moving end
+  return false
 end
 
 function Unit:IsElite()
