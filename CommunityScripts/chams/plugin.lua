@@ -117,6 +117,54 @@ function Plugin.onTick()
 end
 
 function Plugin.onDraw()
+    local vis, open = imgui.begin_window("Chams", 0)
+    if not vis then
+        imgui.end_window()
+        return
+    end
+    if not open then
+        imgui.end_window()
+        return
+    end
+
+    local changed, val
+
+    changed, val = imgui.checkbox("Enabled", cfg.enabled)
+    if changed then cfg.enabled = val end
+
+    imgui.separator()
+    imgui.text("Entity Types")
+
+    changed, val = imgui.checkbox("Hostile", cfg.show_hostile)
+    if changed then cfg.show_hostile = val end
+
+    changed, val = imgui.checkbox("Neutral", cfg.show_neutral)
+    if changed then cfg.show_neutral = val end
+
+    changed, val = imgui.checkbox("Friendly", cfg.show_friendly)
+    if changed then cfg.show_friendly = val end
+
+    changed, val = imgui.checkbox("Players", cfg.show_players)
+    if changed then cfg.show_players = val end
+
+    changed, val = imgui.checkbox("Rares", cfg.show_rares)
+    if changed then cfg.show_rares = val end
+
+    changed, val = imgui.checkbox("Quest Mobs", cfg.show_quest)
+    if changed then cfg.show_quest = val end
+
+    imgui.separator()
+    imgui.text("Settings")
+
+    changed, val = imgui.slider_int("Max Range", cfg.max_range, 1, 100)
+    if changed then cfg.max_range = val end
+
+    changed, val = imgui.slider_int("Max Highlights", cfg.max_highlights, 1, 5)
+    if changed then cfg.max_highlights = val end
+
+    settings.save("chams", cfg)
+
+    imgui.end_window()
 end
 
 return Plugin
