@@ -214,21 +214,19 @@ function Unit:IsFacing(other, threshold)
   return ok and result or false
 end
 
+--- Match helper: returns true if aura entry matches a name or spell_id key.
+local function aura_matches(a, key)
+  if type(key) == "number" then
+    return a.spell_id == key
+  end
+  return a.name == key
+end
+
 function Unit:HasAura(name_or_id)
   local auras = self.Auras
   if auras then
-    local is_id = type(name_or_id) == "number"
     for i = 1, #auras do
-      local a = auras[i]
-      if is_id then
-        if a.spell_id == name_or_id then
-          return true
-        end
-      else
-        if a.name == name_or_id then
-          return true
-        end
-      end
+      if aura_matches(auras[i], name_or_id) then return true end
     end
     return false
   end
@@ -236,22 +234,64 @@ function Unit:HasAura(name_or_id)
   return ok and result or false
 end
 
+--- Returns the full aura table for a given aura (name or spell_id).
+--- Prefers the snapshot (Auras) so caster_name, dispel_type, etc. are available
+--- without a live game call. Falls back to game.aura_info for units whose
+--- snapshot may be incomplete.
 function Unit:GetAura(name_or_id)
-  local ok, result = pcall(game.aura_info, self.obj_ptr, name_or_id)
-  if ok and result then
-    return result
+  local auras = self.Auras
+  if auras then
+    for i = 1, #auras do
+      if aura_matches(auras[i], name_or_id) then return auras[i] end
+    end
   end
+  local ok, result = pcall(game.aura_info, self.obj_ptr, name_or_id)
+  if ok and result then return result end
   return nil
 end
 
+--- Returns the aura only if it was cast by the local player.
+--- Checks caster_name from the snapshot first, then falls back to
+--- game.aura_info's is_from_player flag.
 function Unit:GetAuraByMe(name_or_id)
-  local aura = self:GetAura(name_or_id)
-  if not aura then
-    return nil
+  local auras = self.Auras
+  if auras and Me then
+    for i = 1, #auras do
+      local a = auras[i]
+      if aura_matches(a, name_or_id) then
+        if a.caster_name and a.caster_name == Me.Name then return a end
+        if a.caster_lo and Me.guid_lo and a.caster_lo == Me.guid_lo
+            and a.caster_hi == Me.guid_hi then
+          return a
+        end
+      end
+    end
   end
-  -- game.aura_info returns is_from_player (bool), not a GUID
-  if aura.is_from_player then
-    return aura
+  local ok, result = pcall(game.aura_info, self.obj_ptr, name_or_id)
+  if ok and result and result.is_from_player then return result end
+  return nil
+end
+
+--- Returns the aura only if it was cast by a specific unit.
+--- @param name_or_id  Aura name or spell_id
+--- @param caster      Unit wrapper of the caster to match
+function Unit:GetAuraByCaster(name_or_id, caster)
+  if not caster then return nil end
+  local auras = self.Auras
+  if auras then
+    for i = 1, #auras do
+      local a = auras[i]
+      if aura_matches(a, name_or_id) then
+        if a.caster_name and caster.Name and a.caster_name == caster.Name then
+          return a
+        end
+        if a.caster_lo and caster.guid_lo
+            and a.caster_lo == caster.guid_lo
+            and a.caster_hi == caster.guid_hi then
+          return a
+        end
+      end
+    end
   end
   return nil
 end
@@ -270,6 +310,41 @@ end
 
 function Unit:HasBuffByMe(name_or_id)
   return self:GetAuraByMe(name_or_id) ~= nil
+end
+
+--- Returns all auras on this unit, each with full data:
+---   spell_id, name, stacks, duration, expire_time, flags, time_mod,
+---   instance_id, dispel_type, dispel_name, caster_lo, caster_hi, caster_name
+function Unit:GetAuras()
+  return self.Auras or {}
+end
+
+--- Returns all auras cast by a specific unit.
+function Unit:GetAurasByCaster(caster)
+  if not caster then return {} end
+  local result = {}
+  local auras = self.Auras
+  if auras then
+    for i = 1, #auras do
+      local a = auras[i]
+      local match = false
+      if a.caster_name and caster.Name and a.caster_name == caster.Name then
+        match = true
+      elseif a.caster_lo and caster.guid_lo
+          and a.caster_lo == caster.guid_lo
+          and a.caster_hi == caster.guid_hi then
+        match = true
+      end
+      if match then result[#result + 1] = a end
+    end
+  end
+  return result
+end
+
+--- Returns all auras cast by the local player.
+function Unit:GetAurasByMe()
+  if not Me then return {} end
+  return self:GetAurasByCaster(Me)
 end
 
 -- ── Dispel helpers ──────────────────────────────────────────────────
