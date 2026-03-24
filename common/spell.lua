@@ -222,30 +222,21 @@ function SpellWrapper:CastEx(target, opts)
   local skipfacing = opts.skipFacing or false
   local skipmoving = opts.skipMoving or false
   local skiplos = opts.skipLos or false
-  local tname = target and target.Name or "self"
   if self.Id == 0 or not self.IsKnown then
-    print(string.format("[CastEx] %s → %s BLOCKED: not known (id=%d known=%s)", self.Name, tname, self.Id, tostring(self.IsKnown)))
     return false
   end
   if Pallas._tick_throttled then
-    print(string.format("[CastEx] %s → %s BLOCKED: tick throttled", self.Name, tname))
     return false
   end
 
   local now = os.clock()
-  if now < self._fail_until then
-    print(string.format("[CastEx] %s → %s BLOCKED: fail backoff (%.2fs left)", self.Name, tname, self._fail_until - now))
-    return false
-  end
-  if now < self._cast_until then
-    print(string.format("[CastEx] %s → %s BLOCKED: cast throttle (%.2fs left)", self.Name, tname, self._cast_until - now))
+  if now < self._fail_until or now < self._cast_until then
     return false
   end
 
   if not skipusable then
     local ok, usable = pcall(game.is_usable_spell, self.Id)
     if ok and not usable then
-      print(string.format("[CastEx] %s → %s BLOCKED: not usable", self.Name, tname))
       return false
     end
   end
@@ -256,7 +247,6 @@ function SpellWrapper:CastEx(target, opts)
   -- Don't throttle the tick — other spells may still be castable.
   local cok, cd = pcall(game.spell_cooldown, self.Id)
   if cok and cd and cd.on_cooldown then
-    print(string.format("[CastEx] %s → %s BLOCKED: on cooldown", self.Name, tname))
     return false
   end
 
@@ -264,14 +254,12 @@ function SpellWrapper:CastEx(target, opts)
   if not skipmoving and Me:IsMoving() then
     local iok, info = pcall(game.get_spell_info, self.Id)
     if iok and info and info.cast_time and info.cast_time > 0 then
-      print(string.format("[CastEx] %s → %s BLOCKED: moving (cast_time=%.1f)", self.Name, tname, info.cast_time))
       return false
     end
   end
 
   -- Range check: skip if target is out of spell range.
   if target and target ~= Me and not self:InRange(target) then
-    print(string.format("[CastEx] %s → %s BLOCKED: out of range", self.Name, tname))
     return false
   end
 
@@ -279,7 +267,6 @@ function SpellWrapper:CastEx(target, opts)
   if not skipfacing and target and target ~= Me and Me and Me.obj_ptr and target.obj_ptr then
     local fok, facing = pcall(game.is_facing, Me.obj_ptr, target.obj_ptr)
     if fok and not facing then
-      print(string.format("[CastEx] %s → %s BLOCKED: not facing", self.Name, tname))
       return false
     end
   end
@@ -289,16 +276,13 @@ function SpellWrapper:CastEx(target, opts)
   if not skiplos and target and target ~= Me and Me and Me.obj_ptr and target.obj_ptr then
     local lok, visible = pcall(game.is_visible, Me.obj_ptr, target.obj_ptr, 0x03)
     if lok and not visible then
-      print(string.format("[CastEx] %s → %s BLOCKED: no line of sight", self.Name, tname))
       return false
     end
   end--]]
 
-  print(string.format("[CastEx] %s → %s CASTING...", self.Name, tname))
   local code, desc = self:Cast(target)
 
   if code == RESULT_SUCCESS or code == RESULT_QUEUED then
-    print(string.format("[CastEx] %s → %s SUCCESS (code=%d desc=%s)", self.Name, tname, code, desc or ""))
     Pallas._last_cast = self.Name
     Pallas._last_cast_time = now
     Pallas._last_cast_tgt = target and target.Name or "self"
@@ -308,18 +292,15 @@ function SpellWrapper:CastEx(target, opts)
     self._cast_until = now + CAST_THROTTLE
     return true
   elseif code == RESULT_THROTTLED then
-    print(string.format("[CastEx] %s → %s RESULT: throttled (code=%d)", self.Name, tname, code))
     Pallas._tick_throttled = true
     return false
   elseif code == RESULT_NOT_READY or code == RESULT_ON_CD then
     -- GCD is rolling or spell system is busy — not a real failure.
     -- Stop trying more spells this tick (GCD applies to everything)
     -- but don't penalise this spell with a backoff.
-    print(string.format("[CastEx] %s → %s RESULT: not ready/GCD (code=%d desc=%s)", self.Name, tname, code, desc or ""))
     Pallas._tick_throttled = true
     return false
   else
-    print(string.format("[CastEx] %s → %s RESULT: FAILED (code=%d desc=%s)", self.Name, tname, code, desc or ""))
     self._fail_until = now + FAIL_BACKOFF
     Pallas._last_fail = self.Name
     Pallas._last_fail_time = now
