@@ -647,6 +647,8 @@ end
 local was_in_combat = false
 
 local function BloodDKCombat()
+  if Me.IsMounted then return end
+
   -- Out of combat maintenance
   if not Me.InCombat then
     if was_in_combat then
@@ -656,11 +658,15 @@ local function BloodDKCombat()
       combat_enter_time = 0
     end
 
-    -- Bone Shield out of combat (30s+ before pull per guide)
+    -- Bone Shield out of combat (30s+ before pull per guide).
+    -- game.cast_spell returns result=6 when no target is selected,
+    -- so only attempt when a target exists.
     if PallasSettings.BloodMaintainBoneShieldOOC then
       if S("BloodUseBoneShield") and not Me:HasAura("Bone Shield") then
         if not Me.IsCasting and not Me.IsChanneling then
-          CastNoTarget(Spell.BoneShield)
+          if Me.Target and not Me.Target.IsDead then
+            CastNoTarget(Spell.BoneShield)
+          end
         end
       end
     end

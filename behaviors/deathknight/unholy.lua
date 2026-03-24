@@ -764,6 +764,8 @@ end
 local was_in_combat = false
 
 local function UnholyDKCombat()
+  if Me.IsMounted then return end
+
   -- ── Out of combat ──
   if not Me.InCombat then
     if was_in_combat then

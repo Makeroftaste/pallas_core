@@ -144,6 +144,30 @@ function Heal:GetMembersBelow(pct)
   return members, #members
 end
 
+--- Returns the highest-priority member that has a dispellable debuff of the
+--- given type(s), or nil if none found.
+--- @param types number|table  Dispel type(s): 1=Magic, 2=Curse, 3=Disease, 4=Poison, 9=Enrage
+function Heal:GetDispelTarget(types)
+  for _, v in ipairs(self.PriorityList) do
+    if v.Unit and not v.Unit.IsDead and v.Unit:HasDispellableDebuff(types) then
+      return v.Unit
+    end
+  end
+  return nil
+end
+
+--- Returns all members that have a dispellable debuff of the given type(s).
+--- @param types number|table  Dispel type(s)
+function Heal:GetDispelTargets(types)
+  local targets = {}
+  for _, v in ipairs(self.PriorityList) do
+    if v.Unit and not v.Unit.IsDead and v.Unit:HasDispellableDebuff(types) then
+      targets[#targets + 1] = v.Unit
+    end
+  end
+  return targets, #targets
+end
+
 function Heal:GetMembersAround(friend, dist, threshold)
   threshold = threshold or 100
   local members = {}

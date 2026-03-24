@@ -39,10 +39,11 @@ function Behavior:Initialize()
 
   print("[Pallas] Initialize Behaviors")
 
-  -- Clear existing behavior slots
+  -- Clear existing behavior slots and draw hook (previous spec may have set one)
   for _, v in pairs(BehaviorType) do
     self[v] = {}
   end
+  Pallas._behavior_draw = nil
 
   -- Build path: behaviors/<class>/<spec>.lua
   local spec_file = spec_name:gsub("%s+", ""):lower()
