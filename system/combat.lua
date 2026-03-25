@@ -96,6 +96,7 @@ function Combat:ExclusionFilter()
     if not u:IsAttackable() then goto skip_ex end
     if u:DeadOrGhost() or u.Health <= 1 then goto skip_ex end
     if Me:GetDistance(u) >= 40 then goto skip_ex end
+    if u:IsImmune() then goto skip_ex end
 
     -- Exempt current target when AttackOOC is enabled
     if u.Guid == my_tgt_guid and PallasSettings.PallasAttackOOC then

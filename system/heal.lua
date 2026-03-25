@@ -49,7 +49,6 @@ function Heal:CollectTargets()
     local eu = e.unit
     if not eu then goto skip end
     if eu.is_dead then goto skip end
-    if eu.health and eu.health <= 1 then goto skip end
 
     -- 40yd range pre-filter
     if mx and e.position then
