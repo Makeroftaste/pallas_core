@@ -110,26 +110,24 @@ function SpellWrapper:InRange(target)
     if ok and val ~= nil then
       if val == 1 then return true end
 
-      -- val == 0: game says out of range. For short-range spells (<=8yd),
-      -- is_spell_in_range uses center-to-center distance and ignores hitbox
-      -- size, giving false negatives on large models. Override using bbox
-      -- edge-to-edge distance: subtract the target's model half-width.
-      if val == 0 and Me and Me.Position and target.Position then
+      -- val == 0: game says out of range.  IsSpellInRange can give false
+      -- negatives for short-range / melee spells because it doesn't always
+      -- account for combat reach on large models.  Override with the same
+      -- formula the game uses in UnitInRange (sub_26FDFE0): sum both
+      -- units' CombatReach (CGUnit + 0x11C74) and compare 3D distance.
+      if val == 0 and Me then
         local mr = self._max_range
         if not mr then
           local iok, info = pcall(game.get_spell_info, self.Id)
           mr = (iok and info) and (info.max_range or 0) or 0
           self._max_range = mr
         end
-        if mr > 0 and mr <= 8 then
-          local dx = Me.Position.x - target.Position.x
-          local dy = Me.Position.y - target.Position.y
-          local dz = Me.Position.z - target.Position.z
-          local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-          local bbox_r = 0
-          local bok, bb = pcall(game.entity_bounds, target.obj_ptr)
-          if bok and bb then bbox_r = bb.width * 0.5 end
-          return (dist - bbox_r) <= mr
+        if mr > 0 and mr <= 10 then
+          local d = Me:GetDistance(target)
+          if d < 0 then return true end
+          local my_cr    = Me.CombatReach     or 0
+          local their_cr = target.CombatReach  or 0
+          return d <= (mr + my_cr + their_cr)
         end
       end
 

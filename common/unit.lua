@@ -4,6 +4,8 @@
 --   obj_ptr, cgunit, guid, guid_lo, guid_hi, name, position, facing,
 --   entry_id, class, unit = { health, max_health, level, ... }
 
+local bit = require("bit")
+
 local Unit = {}
 Unit.__index = Unit
 
@@ -149,61 +151,53 @@ function Unit:GetReaction(other)
   return ok and result or 4
 end
 
-function Unit:GetDistance(other)
-  if not other then
-    return 999
-  end
-
-  local sp = self.Position
-  local op = other.Position
-
-  -- Live fallback: position is nil out of combat for non-player entities.
-  -- Query the archetype data directly which may succeed even when the
-  -- snapshot didn't populate position (e.g. freshly entered combat).
-  if not sp and self.obj_ptr then
+function Unit:_ResolvePos()
+  local p = self.Position
+  if not p and self.obj_ptr then
     local ok, x, y, z = pcall(game.entity_position, self.obj_ptr)
     if ok and x then
-      sp = { x = x, y = y, z = z }
-      self.Position = sp
+      p = { x = x, y = y, z = z }
+      self.Position = p
     end
   end
-  if not op and other.obj_ptr then
-    local ok, x, y, z = pcall(game.entity_position, other.obj_ptr)
-    if ok and x then
-      op = { x = x, y = y, z = z }
-      other.Position = op
-    end
-  end
+  return p
+end
 
-  if not sp or not op then
-    return -1
-  end
+function Unit:GetDistance(other)
+  if not other then return 999 end
+  local sp = self:_ResolvePos()
+  local op = other._ResolvePos and other:_ResolvePos() or other.Position
+  if not sp or not op then return -1 end
   return game.distance(sp.x, sp.y, sp.z, op.x, op.y, op.z)
 end
 
+function Unit:GetDistance2D(other)
+  if not other then return 999 end
+  local sp = self:_ResolvePos()
+  local op = other._ResolvePos and other:_ResolvePos() or other.Position
+  if not sp or not op then return -1 end
+  local dx = sp.x - op.x
+  local dy = sp.y - op.y
+  return math.sqrt(dx * dx + dy * dy)
+end
+
+local MELEE_LEEWAY = 4.0 / 3.0 -- 1.3333 yd base melee bonus
+local MELEE_MIN    = 5.0        -- server enforces a 5 yd floor
+
 function Unit:InMeleeRange(other)
-  if not other then
-    return false
-  end
+  if not other then return false end
 
-  -- Get distance between units
+  -- WoW melee range = max(5, attacker.CombatReach + target.CombatReach + 4/3)
+  -- Game uses 3D distance (confirmed via RE of sub_26FDFE0 UnitInRange).
   local d = self:GetDistance(other)
-  if d < 0 then
-    return true
-  end -- unknown distance: assume in range
+  if d < 0 then return true end
 
-  -- Enhanced check using bounding radius when available
-  if game.entity_bounds and other.obj_ptr then
-    local ok, bounds = pcall(game.entity_bounds, other.obj_ptr)
-    if ok and bounds then
-      -- Use blood DK approach: 5yd base + target's model half-width
-      local melee_range = 5.0 + (bounds.width * 0.5)
-      return d <= melee_range
-    end
-  end
+  local my_cr    = self.CombatReach  or 0
+  local their_cr = other.CombatReach or 0
+  local range    = my_cr + their_cr + MELEE_LEEWAY
+  if range < MELEE_MIN then range = MELEE_MIN end
 
-  -- Fallback to standard melee range
-  return d <= 5.0
+  return d <= range
 end
 
 function Unit:IsFacing(other, threshold)
@@ -485,6 +479,34 @@ end
 
 function Unit:IsWorldBoss()
   return self.Classification == 3
+end
+
+-- TrinityCore UNIT_FIELD_FLAGS — confirmed via dead skinnable beast showing
+-- 0x04008000 (bits 15 + 26 = UNK_15 + SKINNABLE), matching expected state.
+local UFLAG_IMMUNE_TO_PC  = 0x00000100  -- bit 8
+local UFLAG_IMMUNE_TO_NPC = 0x00000200  -- bit 9
+
+local IMMUNE_AURAS = {
+  [642]   = true,  -- Divine Shield
+  [45438] = true,  -- Ice Block
+  [19263] = true,  -- Deterrence
+  [33786] = true,  -- Cyclone
+  [710]   = true,  -- Banish
+}
+
+function Unit:IsImmune()
+  local flags = self.UnitFlags or 0
+  if bit.band(flags, UFLAG_IMMUNE_TO_PC + UFLAG_IMMUNE_TO_NPC) ~= 0 then
+    return true
+  end
+
+  local auras = self.Auras
+  if auras then
+    for i = 1, #auras do
+      if IMMUNE_AURAS[auras[i].spell_id] then return true end
+    end
+  end
+  return false
 end
 
 --- True if the unit is boss-level (game level == -1 / skull).

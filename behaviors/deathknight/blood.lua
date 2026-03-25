@@ -205,17 +205,8 @@ end
 
 -- ── Tank Targeting (priority-based, no player target required) ─
 
-local MELEE_BASE = 5.0
-local bbox_cache = {}
-
-local function GetBboxRadius(obj_ptr)
-  local cached = bbox_cache[obj_ptr]
-  if cached then return cached end
-  local ok, bb = pcall(game.entity_bounds, obj_ptr)
-  local r = (ok and bb) and (bb.width * 0.5) or 0
-  bbox_cache[obj_ptr] = r
-  return r
-end
+local MELEE_LEEWAY = 4.0 / 3.0
+local MELEE_MIN    = 5.0
 
 local function GetCombatEnemies()
   local entities = Pallas._entity_cache or {}
@@ -233,9 +224,11 @@ local function GetCombatEnemies()
     if eu.health and eu.health <= 0 then goto skip end
     if not eu.in_combat then goto skip end
 
-    -- Filter out friendly units (pets, guardians, allies)
     local a_ok, attackable = pcall(game.unit_is_attackable, e.obj_ptr)
     if a_ok and not attackable then goto skip end
+
+    local u = Unit:New(e)
+    if u:IsImmune() then goto skip end
 
     if e.position then
       local dx = mx - e.position.x
@@ -243,11 +236,9 @@ local function GetCombatEnemies()
       local dz = mz - e.position.z
       local dist_sq = dx * dx + dy * dy + dz * dz
       if dist_sq <= 1600 then
-        local u = Unit:New(e)
         results[#results + 1] = {
           unit = u,
           dist_sq = dist_sq,
-          radius = GetBboxRadius(e.obj_ptr),
         }
       end
     end
@@ -272,10 +263,13 @@ end
 
 local function MeleeTarget(enemies)
   local tgt_guid = Me.Target and not Me.Target.IsDead and Me.Target.Guid or nil
+  local my_cr = Me.CombatReach or 0
   local best = nil
   for _, entry in ipairs(enemies) do
     if entry.dist_sq > 225 then break end
-    local range = MELEE_BASE + entry.radius
+    local their_cr = entry.unit.CombatReach or 0
+    local range = my_cr + their_cr + MELEE_LEEWAY
+    if range < MELEE_MIN then range = MELEE_MIN end
     if entry.dist_sq <= range * range then
       if tgt_guid and entry.unit.Guid == tgt_guid then return entry.unit end
       if not best then best = entry.unit end
@@ -652,7 +646,6 @@ local function BloodDKCombat()
   -- Out of combat maintenance
   if not Me.InCombat then
     if was_in_combat then
-      bbox_cache = {}
       was_in_combat = false
       opener_done = false
       combat_enter_time = 0

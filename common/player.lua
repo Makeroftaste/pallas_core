@@ -37,6 +37,23 @@ function Player:StopCasting()
   game.stop_casting()
 end
 
+-- Cancel a player aura/buff by spell ID or name.
+---@param name_or_id number|string - Spell ID or aura name to cancel
+---@return boolean - true if the cancel was queued
+function Player:CancelAura(name_or_id)
+  local spell_id
+  if type(name_or_id) == "number" then
+    spell_id = name_or_id
+  else
+    local aura = self:GetAura(name_or_id)
+    if not aura then return false end
+    spell_id = aura.spell_id
+  end
+  if not spell_id or spell_id == 0 then return false end
+  local ok, result = pcall(game.cancel_aura, spell_id)
+  return ok and result or false
+end
+
 -- Set the current target to a unit
 ---@param target Unit - The unit to target
 ---@return boolean - true if the target was set successfully
