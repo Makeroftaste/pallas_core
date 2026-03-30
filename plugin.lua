@@ -73,6 +73,7 @@ local CORE_DEFAULTS = {
   PallasInterruptPercentage = 80, -- Interrupt when cast is <= 80% complete
   PallasPaused       = false, -- Behavior pause state
   PallasPauseKey     = 580, -- ImGuiKey_F9 default
+  PallasSpellDebug   = false, -- Show spell debug window
 }
 
 local function load_settings()
@@ -257,6 +258,7 @@ function Plugin.onTick()
   last_tick = now
 
   Pallas._tick_throttled = false
+  Pallas._spell_debug_tick = (Pallas._spell_debug_tick or 0) + 1
   Pallas._last_tick = now
 
   -- Refresh world state (OM read + player + target) - always update even when paused
@@ -365,6 +367,9 @@ function Plugin.onDraw()
   if not Me then return end
   Menu:Draw()
   draw_esp()
+  if Spell and Spell.DrawDebugWindow then
+    pcall(Spell.DrawDebugWindow, Spell)
+  end
   if Pallas._behavior_draw then
     pcall(Pallas._behavior_draw)
   end

@@ -46,9 +46,12 @@ local function pos_distance(a, b)
 end
 
 local function DoRotation()
+    if Me.IsMounted then return end
+    if Me:IsDisabled() then return end
+
     local lowest = Heal:GetLowestMember()
 
-    -- Cancel Healing Surge if nobody needs healing
+    -- ── Stop Casting: cancel heals that are no longer needed ───────
     local surge_pct = PallasSettings.RestoShamanHealingSurge or 65
     if (Me.CastingSpellId == Spell.HealingSurge.Id) and (not lowest or lowest.HealthPct > surge_pct) then
         Me:StopCasting()
@@ -58,15 +61,12 @@ local function DoRotation()
         return
     end
 
+    -- ── Off-GCD: Interrupt ─────────────────────────────────────────
     if Spell.WindShear:Interrupt() then
         return
     end
 
-    if Spell:IsGCDActive() then
-        return
-    end
-
-    -- Astral Shift: defensive when more than 1 enemy targeting us
+    -- ── Off-GCD: Astral Shift (defensive when multiple enemies on us)
     local enemies_on_me = 0
     for _, u in ipairs(Combat.Targets or {}) do
         local t = u:GetTarget()
@@ -78,17 +78,39 @@ local function DoRotation()
         return
     end
 
-    -- Single Target Healing
+    if Spell:IsGCDActive() then
+        return
+    end
+
+    -- ── Pre-compute shared healing state ───────────────────────────
+    local all_friends = Heal.Friends and Heal.Friends.All or {}
+    local wave_pct    = PallasSettings.RestoShamanHealingWave or 80
+    local riptide_pct = PallasSettings.RestoShamanRiptide or 90
+    local ch_count    = PallasSettings.RestoShamanChainHealCount or 3
+    local ch_health   = PallasSettings.RestoShamanChainHealHealth or 75
+    local hst_count   = PallasSettings.RestoShamanHSTCount or 3
+    local hst_health  = PallasSettings.RestoShamanHSTHealth or 80
+
+    -- Single pass: count members below each threshold
+    local members_below_ch  = {}
+    local members_below_hst = 0
+    for _, f in ipairs(all_friends) do
+        if f.HealthPct < ch_health then
+            members_below_ch[#members_below_ch + 1] = f
+        end
+        if f.HealthPct < hst_health then
+            members_below_hst = members_below_hst + 1
+        end
+    end
+
+    -- ── Emergency Single Target ──────────────────────────────────
     if lowest then
         if lowest.HealthPct < surge_pct and Spell.HealingSurge:CastEx(lowest, { skipFacing = true }) then
             return
         end
     end
 
-    -- AoE Healing
-    local ch_count = PallasSettings.RestoShamanChainHealCount or 3
-    local ch_health = PallasSettings.RestoShamanChainHealHealth or 75
-    local members_below_ch, _ = Heal:GetMembersBelow(ch_health)
+    -- ── AoE Healing ────────────────────────────────────────────────
     if #members_below_ch >= ch_count then
         for _, member in ipairs(members_below_ch) do
             local nearby = Heal:GetMembersAround(member, 30, ch_health)
@@ -98,10 +120,7 @@ local function DoRotation()
         end
     end
 
-    local hst_count = PallasSettings.RestoShamanHSTCount or 3
-    local hst_health = PallasSettings.RestoShamanHSTHealth or 80
-    local _, members_below = Heal:GetMembersBelow(hst_health)
-    if members_below >= hst_count and Spell.HealingStreamTotem:CastEx(Me, { skipFacing = true }) then
+    if members_below_hst >= hst_count and Spell.HealingStreamTotem:CastEx(Me, { skipFacing = true }) then
         return
     end
 
@@ -111,7 +130,6 @@ local function DoRotation()
         local hst_entity = find_my_summon("Healing Stream Totem")
         if hst_entity and hst_entity.position then
             local too_far = true
-            local all_friends = Heal.Friends and Heal.Friends.All or {}
             for _, f in ipairs(all_friends) do
                 if f.Position and pos_distance(hst_entity.position, f.Position) <= 30 then
                     too_far = false
@@ -126,11 +144,8 @@ local function DoRotation()
         end
     end
 
-    -- Single Target Healing (continued)
+    -- ── Single Target Healing (continued) ──────────────────────────
     if lowest then
-        local wave_pct = PallasSettings.RestoShamanHealingWave or 80
-        local riptide_pct = PallasSettings.RestoShamanRiptide or 90
-
         if lowest.HealthPct < wave_pct and Spell.HealingWave:CastEx(lowest, { skipFacing = true }) then
             return
         end
@@ -140,7 +155,7 @@ local function DoRotation()
         end
     end
 
-    -- Utility
+    -- ── Utility ────────────────────────────────────────────────────
     local es_choice = PallasSettings.RestoShamanEarthShieldTarget or 0
     if es_choice ~= 2 then                             -- not "Off"
         local tank = Heal.Friends.Tanks[es_choice + 1] -- 0=Tank1, 1=Tank2
@@ -161,13 +176,13 @@ local function DoRotation()
         return
     end
 
-    -- Damage (only when healing is comfortable)
+    -- ── Damage (only when healing is comfortable) ──────────────────
     local dps_above_hp = PallasSettings.RestoShamanDPSAboveHP or 80
     if lowest and (lowest.HealthPct < dps_above_hp or Me.PowerPct < 60) then
         return
     end
 
-    -- Weapon imbue
+    -- Self-buffs: weapon imbue
     local imbue_choice = PallasSettings.RestoShamanWeaponImbue or 0
     if imbue_choice == 0 then
         if not Me:HasAura("Flametongue Weapon (Passive)") and Spell.FlametongueWeapon:CastEx(Me) then
@@ -179,7 +194,7 @@ local function DoRotation()
         end
     end
 
-    -- Shield buff
+    -- Self-buffs: shield
     local shield_choice = PallasSettings.RestoShamanShieldBuff or 0
     if shield_choice == 0 then
         if not Me:HasAura("Water Shield") and Spell.WaterShield:CastEx(Me) then
@@ -207,7 +222,7 @@ local function DoRotation()
     end
 
     for _, u in ipairs(Combat.Targets or {}) do
-        if u:GetAuraByMe("Flame Shock") and Spell.LavaBurst:CastEx(u) then
+        if u.Guid ~= target.Guid and u:GetAuraByMe("Flame Shock") and Spell.LavaBurst:CastEx(u) then
             return
         end
     end

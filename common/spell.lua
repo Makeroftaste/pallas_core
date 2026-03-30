@@ -30,6 +30,31 @@
 local FAIL_BACKOFF = 1.0 -- seconds to suppress a spell after a failed cast
 local CAST_THROTTLE = 0.2 -- seconds before the same spell can be re-attempted
 
+-- ── Spell Debug Log (ring buffer) ──────────────────────────────────
+local SPELL_DEBUG_MAX = 80
+Pallas._spell_debug_log = Pallas._spell_debug_log or {}
+Pallas._spell_debug_idx = Pallas._spell_debug_idx or 0
+
+local RESULT_NAMES = {
+  [0]  = "SUCCESS",
+  [9]  = "THROTTLED",
+  [10] = "NOT_READY",
+  [11] = "ON_CD",
+  [12] = "QUEUED",
+}
+
+Pallas._spell_debug_tick = Pallas._spell_debug_tick or 0
+
+local function spell_debug_log(entry)
+  if not PallasSettings or not PallasSettings.PallasSpellDebug then return end
+  entry.time_real = os.time()
+  entry.tick = Pallas._spell_debug_tick
+  local log = Pallas._spell_debug_log
+  Pallas._spell_debug_idx = Pallas._spell_debug_idx + 1
+  local idx = ((Pallas._spell_debug_idx - 1) % SPELL_DEBUG_MAX) + 1
+  log[idx] = entry
+end
+
 local CAST_OPTS_G1 = { ground = 1 }
 
 local RESULT_SUCCESS = 0
@@ -220,64 +245,153 @@ function SpellWrapper:CastEx(target, opts)
   local skipfacing = opts.skipFacing or false
   local skipmoving = opts.skipMoving or false
   local skiplos = opts.skipLos or false
+  local debugging = PallasSettings and PallasSettings.PallasSpellDebug or false
+
   if self.Id == 0 or not self.IsKnown then
     return false
   end
   if Pallas._tick_throttled then
     return false
   end
-  
+
   local now = os.clock()
   if now < self._fail_until or now < self._cast_until then
+    if debugging then
+      local reason = now < self._fail_until and "fail_backoff" or "cast_throttle"
+      local remaining = math.max(self._fail_until - now, self._cast_until - now)
+      spell_debug_log({
+        time = now, spell = self.Name, id = self.Id,
+        target = target and target.Name or "self",
+        target_hp = target and target.HealthPct or nil,
+        result = "SKIP", reason = reason,
+        detail = string.format("%.2fs remaining", remaining),
+      })
+    end
     return false
   end
 
+  -- Usability check
+  local is_usable = true
   if not skipusable then
     local ok, usable = pcall(game.is_usable_spell, self.Id)
     if ok and not usable then
+      if debugging then
+        spell_debug_log({
+          time = now, spell = self.Name, id = self.Id,
+          target = target and target.Name or "self",
+          target_hp = target and target.HealthPct or nil,
+          result = "SKIP", reason = "not_usable",
+          detail = "is_usable_spell=false",
+        })
+      end
       return false
     end
+    is_usable = not ok or usable
   end
 
-  -- Cooldown check: avoid calling Cast when the spell is clearly on CD.
-  -- is_usable_spell doesn't check cooldowns (e.g. Horn of Winter has no
-  -- resource cost → always "usable" even when on CD).
-  -- Don't throttle the tick — other spells may still be castable.
+  -- Cooldown check
   local cok, cd = pcall(game.spell_cooldown, self.Id)
   if cok and cd and cd.on_cooldown then
+    if debugging then
+      spell_debug_log({
+        time = now, spell = self.Name, id = self.Id,
+        target = target and target.Name or "self",
+        target_hp = target and target.HealthPct or nil,
+        result = "SKIP", reason = "on_cooldown",
+        detail = cd.remaining and string.format("%.1fs left", cd.remaining) or "cd active",
+      })
+    end
     return false
   end
 
-  -- Moving check: if spell has cast time and player is moving, return false
+  -- Moving check
   if not skipmoving and Me:IsMoving() then
     local iok, info = pcall(game.get_spell_info, self.Id)
     if iok and info and info.cast_time and info.cast_time > 0 then
+      if debugging then
+        spell_debug_log({
+          time = now, spell = self.Name, id = self.Id,
+          target = target and target.Name or "self",
+          target_hp = target and target.HealthPct or nil,
+          result = "SKIP", reason = "moving",
+          detail = string.format("cast_time=%.1fs", info.cast_time / 1000),
+        })
+      end
       return false
     end
   end
 
-  -- Range check: skip if target is out of spell range.
-  if target and target.Guid ~= Me.Guid and not self:InRange(target) then
-    return false
+  -- Range check
+  local dist = -1
+  if target and target.Guid ~= Me.Guid then
+    dist = Me:GetDistance(target)
+    if not self:InRange(target) then
+      if debugging then
+        spell_debug_log({
+          time = now, spell = self.Name, id = self.Id,
+          target = target and target.Name or "self",
+          target_hp = target and target.HealthPct or nil,
+          result = "SKIP", reason = "out_of_range",
+          detail = string.format("dist=%.1f", dist),
+        })
+      end
+      return false
+    end
   end
 
-  -- Facing check: most spells require a 180° frontal cone
+  -- Facing check
+  local facing_ok = true
   if not skipfacing and target and target.Guid ~= Me.Guid and Me and Me.obj_ptr and target.obj_ptr then
     local fok, facing = pcall(game.is_facing, Me.obj_ptr, target.obj_ptr)
     if fok and not facing then
+      if debugging then
+        spell_debug_log({
+          time = now, spell = self.Name, id = self.Id,
+          target = target and target.Name or "self",
+          target_hp = target and target.HealthPct or nil,
+          result = "SKIP", reason = "not_facing",
+          detail = string.format("dist=%.1f", dist),
+        })
+      end
       return false
     end
+    facing_ok = not fok or facing
   end
 
   -- Line of sight check
   if not skiplos and target and target.Guid ~= Me.Guid and Me and Me.obj_ptr and target.obj_ptr then
     local lok, visible = pcall(game.is_visible, Me.obj_ptr, target.obj_ptr, 0x03)
     if lok and not visible then
+      if debugging then
+        spell_debug_log({
+          time = now, spell = self.Name, id = self.Id,
+          target = target and target.Name or "self",
+          target_hp = target and target.HealthPct or nil,
+          result = "SKIP", reason = "no_los",
+          detail = string.format("dist=%.1f", dist),
+        })
+      end
       return false
     end
   end
 
   local code, desc = self:Cast(target)
+
+  if debugging then
+    spell_debug_log({
+      time = now, spell = self.Name, id = self.Id,
+      target = target and target.Name or "self",
+      target_hp = target and target.HealthPct or nil,
+      target_dist = dist > 0 and dist or nil,
+      result = RESULT_NAMES[code] or string.format("FAIL(%d)", code),
+      reason = desc or "",
+      detail = string.format("usable=%s cd=%s facing=%s opts={face=%s move=%s los=%s}",
+        tostring(is_usable),
+        (cok and cd) and (cd.on_cooldown and "yes" or "no") or "?",
+        tostring(facing_ok),
+        tostring(skipfacing), tostring(skipmoving), tostring(skiplos)),
+    })
+  end
 
   if code == RESULT_SUCCESS or code == RESULT_QUEUED then
     Pallas._last_cast = self.Name
@@ -292,9 +406,6 @@ function SpellWrapper:CastEx(target, opts)
     Pallas._tick_throttled = true
     return false
   elseif code == RESULT_NOT_READY or code == RESULT_ON_CD then
-    -- GCD is rolling or spell system is busy — not a real failure.
-    -- Stop trying more spells this tick (GCD applies to everything)
-    -- but don't penalise this spell with a backoff.
     Pallas._tick_throttled = true
     return false
   else
@@ -353,6 +464,15 @@ function SpellWrapper:CastAtPos(x_or_entity, y, z)
   local ok, c, d = pcall(game.cast_at_pos, self.Id, x, y, z)
   local code = ok and c or -1
   local desc = ok and (d or "") or tostring(c)
+
+  if PallasSettings and PallasSettings.PallasSpellDebug then
+    spell_debug_log({
+      time = now, spell = self.Name, id = self.Id,
+      target = string.format("ground(%.0f,%.0f,%.0f)", x, y, z),
+      result = RESULT_NAMES[code] or string.format("FAIL(%d)", code),
+      reason = desc or "", detail = "CastAtPos",
+    })
+  end
 
   if code == RESULT_SUCCESS or code == RESULT_QUEUED then
     Pallas._last_cast = self.Name
@@ -423,6 +543,15 @@ function SpellWrapper:CastAtPosLuaPath(x_or_entity, y, z)
   local ok, c, d = pcall(game.cast_at_pos_lua_path, self.Id, x, y, z)
   local code = ok and c or -1
   local desc = ok and (d or "") or tostring(c)
+
+  if PallasSettings and PallasSettings.PallasSpellDebug then
+    spell_debug_log({
+      time = now, spell = self.Name, id = self.Id,
+      target = string.format("ground(%.0f,%.0f,%.0f)", x, y, z),
+      result = RESULT_NAMES[code] or string.format("FAIL(%d)", code),
+      reason = desc or "", detail = "CastAtPosLuaPath",
+    })
+  end
 
   if code == RESULT_SUCCESS or code == RESULT_QUEUED then
     Pallas._last_cast = self.Name
@@ -775,6 +904,142 @@ function Spell:ByName(name)
     return SpellWrapper:new(id, name)
   end
   return NullSpell
+end
+
+-- ── Spell Debug Window ─────────────────────────────────────────────
+local COL_SUCCESS  = { 0.3, 1.0, 0.4, 1.0 }
+local COL_SKIP     = { 0.5, 0.5, 0.5, 1.0 }
+local COL_FAIL     = { 1.0, 0.3, 0.3, 1.0 }
+local COL_THROTTLE = { 1.0, 0.8, 0.2, 1.0 }
+local COL_HEADER   = { 0.4, 0.8, 1.0, 1.0 }
+local COL_LABEL    = { 0.6, 0.6, 0.6, 1.0 }
+local COL_VALUE    = { 0.9, 0.9, 0.9, 1.0 }
+
+local function get_entry_color(result)
+  if result == "SUCCESS" or result == "QUEUED" then return COL_SUCCESS end
+  if result == "SKIP" then return COL_SKIP end
+  if result == "THROTTLED" or result == "NOT_READY" or result == "ON_CD" then return COL_THROTTLE end
+  return COL_FAIL
+end
+
+-- Filter state (not persisted, resets on reload)
+Pallas._spell_debug_filter = Pallas._spell_debug_filter or {
+  show_skip = false,
+  show_throttle = true,
+  show_success = true,
+  show_fail = true,
+}
+
+local function passes_filter(result)
+  local f = Pallas._spell_debug_filter
+  if result == "SKIP" then return f.show_skip end
+  if result == "THROTTLED" or result == "NOT_READY" or result == "ON_CD" then return f.show_throttle end
+  if result == "SUCCESS" or result == "QUEUED" then return f.show_success end
+  return f.show_fail -- hard failures
+end
+
+function Spell:DrawDebugWindow()
+  if not PallasSettings or not PallasSettings.PallasSpellDebug then return end
+
+  local log = Pallas._spell_debug_log
+  if not log or #log == 0 then return end
+
+  imgui.set_next_window_size(500, 450, 4) -- COND_FIRST
+  local visible, open = imgui.begin_window("Spell Debug##pallas_spell_debug", 0)
+  if not visible then
+    imgui.end_window()
+    return
+  end
+  if not open then
+    PallasSettings.PallasSpellDebug = false
+    imgui.end_window()
+    return
+  end
+
+  -- ── Toolbar: filters + clear ──────────────────────────────────────
+  local f = Pallas._spell_debug_filter
+
+  local c1, v1 = imgui.checkbox("Success##sdf1", f.show_success)
+  if c1 then f.show_success = v1 end
+  imgui.same_line(0, 8)
+  local c2, v2 = imgui.checkbox("Skip##sdf2", f.show_skip)
+  if c2 then f.show_skip = v2 end
+  imgui.same_line(0, 8)
+  local c3, v3 = imgui.checkbox("Throttle##sdf3", f.show_throttle)
+  if c3 then f.show_throttle = v3 end
+  imgui.same_line(0, 8)
+  local c4, v4 = imgui.checkbox("Fail##sdf4", f.show_fail)
+  if c4 then f.show_fail = v4 end
+  imgui.same_line(0, 16)
+  if imgui.button("Clear##sdclear") then
+    Pallas._spell_debug_log = {}
+    Pallas._spell_debug_idx = 0
+    imgui.end_window()
+    return
+  end
+
+  imgui.separator()
+
+  -- ── Entries (newest first, grouped by tick) ─────────────────────
+  local total = math.min(Pallas._spell_debug_idx, SPELL_DEBUG_MAX)
+  local head = ((Pallas._spell_debug_idx - 1) % SPELL_DEBUG_MAX) + 1
+  local shown = 0
+  local last_tick = nil
+
+  for i = 0, total - 1 do
+    local idx = head - i
+    if idx < 1 then idx = idx + SPELL_DEBUG_MAX end
+    local e = log[idx]
+    if e and passes_filter(e.result) then
+      -- Tick separator: bold header when tick changes
+      if e.tick ~= last_tick then
+        if last_tick ~= nil then
+          imgui.spacing()
+        end
+        local timestamp = os.date("%H:%M:%S", e.time_real or e.time)
+        imgui.text_colored(COL_HEADER[1], COL_HEADER[2], COL_HEADER[3], COL_HEADER[4],
+          string.format("--- Tick #%d  [%s] ---", e.tick or 0, timestamp))
+        last_tick = e.tick
+      end
+
+      local col = get_entry_color(e.result)
+
+      -- Single line: [RESULT] Spell (id) -> target @ hp% dist | reason
+      local parts = {}
+      parts[#parts + 1] = string.format("  [%s]", e.result or "?")
+      parts[#parts + 1] = string.format("%s (%d)", e.spell or "?", e.id or 0)
+
+      local tgt = e.target or "?"
+      if e.target_hp then
+        tgt = tgt .. string.format(" @ %.0f%%", e.target_hp)
+      end
+      if e.target_dist and e.target_dist > 0 then
+        tgt = tgt .. string.format(" %.1fyd", e.target_dist)
+      end
+      parts[#parts + 1] = "-> " .. tgt
+
+      if e.reason and e.reason ~= "" then
+        parts[#parts + 1] = "| " .. e.reason
+      end
+
+      imgui.text_colored(col[1], col[2], col[3], col[4], table.concat(parts, "  "))
+
+      -- Detail line (dimmer, indented, only if non-empty)
+      if e.detail and e.detail ~= "" then
+        imgui.text_colored(0.4, 0.4, 0.4, 1.0, "    " .. e.detail)
+      end
+
+      shown = shown + 1
+      if shown >= 50 then break end
+    end
+  end
+
+  if shown == 0 then
+    imgui.text_colored(COL_LABEL[1], COL_LABEL[2], COL_LABEL[3], COL_LABEL[4],
+      "No entries match current filters")
+  end
+
+  imgui.end_window()
 end
 
 return Spell

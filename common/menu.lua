@@ -185,6 +185,10 @@ function Menu:Draw()
     local ch4, v4 = imgui.checkbox("Target ESP overlay##pallas_esp", PallasSettings.PallasESP)
     if ch4 then PallasSettings.PallasESP = v4 end
 
+    if PallasSettings.PallasSpellDebug == nil then PallasSettings.PallasSpellDebug = false end
+    local chsd, vsd = imgui.checkbox("Spell Debug Window##pallas_spelldebug", PallasSettings.PallasSpellDebug)
+    if chsd then PallasSettings.PallasSpellDebug = vsd end
+
     imgui.separator()
     
     -- Pause key selector
