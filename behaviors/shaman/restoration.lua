@@ -51,10 +51,16 @@ local function DoRotation()
     local lowest = Heal:GetLowestMember()
 
     -- ── Stop Casting: cancel heals that are no longer needed ───────
+    -- cast_target_lo isn't populated for friendly heal casts in the OM,
+    -- so we check lowest member — if they don't need it, nobody does.
     local surge_pct = PallasSettings.RestoShamanHealingSurge or 65
-    if (Me.CastingSpellId == Spell.HealingSurge.Id) and (not lowest or lowest.HealthPct > surge_pct) then
+    local wave_pct  = PallasSettings.RestoShamanHealingWave or 80
+
+    if Me.CastingSpellId == Spell.HealingSurge.Id and (not lowest or lowest.HealthPct > surge_pct) then
         Me:StopCasting()
-    end
+    elseif Me.CastingSpellId == Spell.HealingWave.Id and (not lowest or lowest.HealthPct > wave_pct) then
+        Me:StopCasting()
+        end
 
     if Me:IsCastingOrChanneling() then
         return
@@ -83,7 +89,6 @@ local function DoRotation()
 
     -- ── Pre-compute shared healing state ───────────────────────────
     local all_friends = Heal.Friends and Heal.Friends.All or {}
-    local wave_pct    = PallasSettings.RestoShamanHealingWave or 80
     local riptide_pct = PallasSettings.RestoShamanRiptide or 90
     local ch_count    = PallasSettings.RestoShamanChainHealCount or 3
     local ch_health   = PallasSettings.RestoShamanChainHealHealth or 75
