@@ -232,6 +232,11 @@ function SpellWrapper:Cast(target)
   return -1, "no target obj_ptr"
 end
 
+-- Units that should skip LOS checks (e.g. phased/underground models)
+local LOS_IGNORE_UNITS = {
+  [56754] = true,
+}
+
 --- Full-check cast: known → throttle → cooldown → Cast().
 ---
 --- Result handling:
@@ -359,7 +364,8 @@ function SpellWrapper:CastEx(target, opts)
   end
 
   -- Line of sight check
-  if not skiplos and target and target.Guid ~= Me.Guid and Me and Me.obj_ptr and target.obj_ptr then
+  if not skiplos and target and target.Guid ~= Me.Guid and Me and Me.obj_ptr and target.obj_ptr
+     and not LOS_IGNORE_UNITS[target.EntryId or 0] then
     local lok, visible = pcall(game.is_visible, Me.obj_ptr, target.obj_ptr, 0x03)
     if lok and not visible then
       if debugging then
