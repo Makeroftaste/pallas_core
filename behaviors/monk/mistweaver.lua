@@ -12,12 +12,14 @@ local options = {
         { type = "slider",   uid = "MWEnvelopingMist",      text = "Enveloping Mist %",              default = 65,  min = 0,                                            max = 100 },
         { type = "slider",   uid = "MWRenewingMist",        text = "Renewing Mist %",                default = 95,  min = 0,                                            max = 100 },
         { type = "slider",   uid = "MWHealingSphereHP",     text = "Healing Sphere %",               default = 50,  min = 0,                                            max = 100 },
+        { type = "slider",   uid = "MWExpelHarmHP",        text = "Expel Harm (Self) %",            default = 85,  min = 0,                                            max = 100 },
 
         { type = "header",   text = "AoE Healing" },
         { type = "slider",   uid = "MWUpliftCount",         text = "Uplift - Members Below",         default = 3,   min = 1,                                            max = 10 },
         { type = "slider",   uid = "MWUpliftHP",            text = "Uplift - Health %",              default = 85,  min = 0,                                            max = 100 },
         { type = "slider",   uid = "MWSpinningCraneHP",     text = "Spinning Crane Kick - Health %", default = 75,  min = 0,                                            max = 100 },
         { type = "slider",   uid = "MWSpinningCraneCount",  text = "Spinning Crane Kick - Members",  default = 4,   min = 1,                                            max = 10 },
+        { type = "combobox", uid = "MWTalentTier6",        text = "Tier 6 AoE Talent",              default = 0,   options = { "Spinning Crane Kick", "Rushing Jade Wind" } },
 
         { type = "header",   text = "Mana Management" },
         { type = "slider",   uid = "MWManaTeaBelow",        text = "Mana Tea Below Mana %",          default = 80,  min = 0,                                            max = 100 },
@@ -27,6 +29,7 @@ local options = {
         { type = "slider",   uid = "MWLifeCocoonHP",        text = "Life Cocoon %",                  default = 25,  min = 0,                                            max = 100 },
         { type = "slider",   uid = "MWRevivalHP",           text = "Revival - Health %",             default = 40,  min = 0,                                            max = 100 },
         { type = "slider",   uid = "MWRevivalCount",        text = "Revival - Members Below",        default = 3,   min = 1,                                            max = 10 },
+        { type = "slider",   uid = "MWSelfSurvivalHP",    text = "Self-Survival CD %",             default = 20,  min = 0,                                            max = 100 },
         { type = "checkbox", uid = "MWUseThunderFocusTea",  text = "Use Thunder Focus Tea",          default = true },
         { type = "slider",   uid = "MWTFTUpliftCount",      text = "TFT Uplift - Members Below",     default = 3,   min = 1,                                            max = 10 },
         { type = "slider",   uid = "MWTFTUpliftHP",         text = "TFT Uplift - Health %",          default = 80,  min = 0,                                            max = 100 },
@@ -34,6 +37,7 @@ local options = {
         { type = "header",   text = "Utility" },
         { type = "checkbox", uid = "MWStopCasting",         text = "Cancel overheals",               default = true },
         { type = "checkbox", uid = "MWLegacyOfTheEmperor",  text = "Legacy of the Emperor",          default = true },
+        { type = "checkbox", uid = "MWWiseSerpent",        text = "Stance of the Wise Serpent",     default = true },
         { type = "combobox", uid = "MWTalentTier4",         text = "Tier 4 Talent",                  default = 0,   options = { "Chi Wave", "Zen Sphere", "Chi Burst" } },
     },
 }
@@ -49,9 +53,13 @@ local auras = {
     thunder_focus_tea = 116680,
     mana_tea_stacks   = 115867, -- Mana Tea (stacking buff)
     legacy_of_emperor = 117666,
+    mark_of_the_wild  = 1126,
+    blessing_of_kings = 20217,
+    embrace_shale     = 90363,
     life_cocoon       = 116849,
     serpents_zeal     = 127722,
     zen_sphere        = 124081,
+    wise_serpent      = 136336,
 }
 
 local JADE_STATUE_KEY = 550 -- ImGuiKey E key
@@ -71,6 +79,13 @@ end
 local function DoRotation()
     if Me.IsMounted then return end
     if Me:IsDisabled() then return end
+
+    -- ── Stance of the Wise Serpent ──────────────────────────────────
+    if PallasSettings.MWWiseSerpent ~= false and not Me:HasAura(auras.wise_serpent) then
+        if Spell.StanceOfTheWiseSerpent:CastEx(Me) then
+            return
+        end
+    end
 
     -- ── Jade Serpent Statue: hold E key to place at player position
     if imgui.is_key_pressed(JADE_STATUE_KEY) and Spell.SummonJadeSerpentStatue then
@@ -158,12 +173,29 @@ local function DoRotation()
         end
     end
 
+    -- Self-survival: Fortifying Brew / Dampen Harm
+    local survival_pct = PallasSettings.MWSelfSurvivalHP or 20
+    if Me.HealthPct < survival_pct then
+        if Spell.FortifyingBrew:CastEx(Me) then
+            return
+        end
+        if Spell.DampenHarm and Spell.DampenHarm:CastEx(Me) then
+            return
+        end
+    end
+
     -- Healing Sphere: spam on critically low targets
     local hs_pct = PallasSettings.MWHealingSphereHP or 50
     if lowest and lowest.HealthPct < hs_pct then
         if Spell.HealingSphere:CastAtPos(lowest) then
             return
         end
+    end
+
+    -- Expel Harm: self-heal + Chi builder
+    local eh_pct = PallasSettings.MWExpelHarmHP or 85
+    if Me.HealthPct < eh_pct and Me.Chi < 4 and Spell.ExpelHarm:CastEx(Me) then
+        return
     end
 
     -- Revival: raid-wide emergency heal
@@ -238,12 +270,28 @@ local function DoRotation()
         return
     end
 
-    -- ── AoE Healing: Spinning Crane Kick ────────────────────────────
+    -- ── AoE Healing: Spinning Crane Kick / Rushing Jade Wind ──────
     local sck_hp               = PallasSettings.MWSpinningCraneHP or 75
     local sck_count            = PallasSettings.MWSpinningCraneCount or 4
-    local members_below_sck, _ = Heal:GetMembersBelow(sck_hp)
-    if #members_below_sck >= sck_count and Spell.SpinningCraneKick:CastEx(Me, { skipFacing = true }) then
-        return
+    local tier6_choice         = PallasSettings.MWTalentTier6 or 0
+
+    if tier6_choice == 1 then
+        -- Rushing Jade Wind: instant AoE heal, 8-yard range
+        local rjw_nearby = 0
+        for _, f in ipairs(all_friends) do
+            if f.HealthPct < sck_hp and Me:GetDistance(f) <= 8 then
+                rjw_nearby = rjw_nearby + 1
+            end
+        end
+        if rjw_nearby >= sck_count and Spell.RushingJadeWind:CastEx(Me) then
+            return
+        end
+    else
+        -- Spinning Crane Kick: channeled AoE heal
+        local members_below_sck, _ = Heal:GetMembersBelow(sck_hp)
+        if #members_below_sck >= sck_count and Spell.SpinningCraneKick:CastEx(Me, { skipFacing = true }) then
+            return
+        end
     end
 
     -- ── Single Target Healing ───────────────────────────────────────
@@ -340,8 +388,13 @@ local function DoRotation()
     -- ── Legacy of the Emperor (out of combat buff) ──────────────────
     if not Me.InCombat and PallasSettings.MWLegacyOfTheEmperor ~= false then
         for _, f in ipairs(all_friends) do
-            if not f:HasAura(auras.legacy_of_emperor) and Spell.LegacyOfTheEmperor:CastEx(f, { skipFacing = true }) then
-                return
+            if not f:HasAura(auras.legacy_of_emperor)
+               and not f:HasAura(auras.mark_of_the_wild)
+               and not f:HasAura(auras.blessing_of_kings)
+               and not f:HasAura(auras.embrace_shale) then
+                if Spell.LegacyOfTheEmperor:CastEx(f, { skipFacing = true }) then
+                    return
+                end
             end
         end
     end

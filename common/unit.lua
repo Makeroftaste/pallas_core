@@ -552,6 +552,7 @@ local IMMUNE_AURAS = {
   [19263] = true,  -- Deterrence
   [33786] = true,  -- Cyclone
   [710]   = true,  -- Banish
+  [110945] = true,
 }
 
 function Unit:IsImmune()
